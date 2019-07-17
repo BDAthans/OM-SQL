@@ -1,0 +1,268 @@
+--Example Usage of IN statement (in OMSQLDB)
+SELECT RX_ID, patient_id
+FROM Frame_RX
+WHERE rx_usage_cd IN (SELECT code FROM CODE WHERE code=429);
+
+--SELECT Query to show Eyewear Orders that are in ordered status that are older than specified date
+DECLARE @removeBeforeThisDate nvarchar(1000) 
+SET @removeBeforeThisDate = '2018-12-31 00:00:00:000';
+
+SELECT rx_id, patient_id, promise_date, (patient.First_name +  ' ' + Patient.Last_name) as PatientName, 
+code.description as LabStatus, Rcvd_By_Date, Rcvd_By, Notified_By_Date, Notified_By, Delivered_By_Date, Delivered_By
+FROM (frame_rx INNER JOIN patient ON Patient.Patient_no=frame_rx.patient_id) LEFT JOIN Vendor ON vendor.vendor_no=frame_rx.order_job_where LEFT JOIN Code ON code.code=frame_rx.rx_order_cd
+WHERE promise_Date < @removeBeforeThisDate
+AND patient.active=1
+AND Ordered_By_Date IS NOT NULL
+AND Rcvd_By_Date is NULL 
+
+--UPDATE Query to update Eyewear Orders to be received, notified, and dispensed if created before specified date
+DECLARE @providerID int;
+SET @providerID = 1;
+
+DECLARE @removeBeforeThisDate nvarchar(1000) 
+SET @removeBeforeThisDate = '2018-12-31 00:00:00:000';
+
+Update frame_RX
+SET Rcvd_By_Date='2019-07-11 00:00:00:000', Rcvd_By=@providerID, 
+Notified_By_Date='2019-07-11 00:00:00:000', Notified_By=@providerID,
+Delivered_By_Date='2019-07-11 00:00:00:000', Delivered_By=@providerID
+FROM dbo.Frame_RX
+JOIN dbo.patient
+ON patient.patient_no=frame_RX.patient_id
+WHERE promise_Date < @removeBeforeThisDate
+AND patient.active=1
+AND Ordered_By_Date IS NOT NULL
+AND Rcvd_By_Date is NULL
+
+--SQL Query to display patient's that have a zip code that is not a number and less than 5 digits (When error 217887 on recall listing report)
+SELECT p.patient_no, p.first_name, p.last_name, a.zip
+FROM patient p, address a
+WHERE p.patient_no=a.address_no
+AND isnumeric(a.zip) <> 1
+AND a.zip <> ''			
+--AND a.zip NOT LIKE '%-%'			--Removes out all zip codes in XXXXX-XXXX format
+ORDER BY patient_no ASC;
+
+SELECT p.patient_no, p.first_name, p.last_name, a.zip
+FROM patient p
+JOIN address a ON p.patient_no=a.address_no
+WHERE isnumeric(a.zip) <> 1
+AND a.zip <> ''
+--AND a.zip NOT LIKE '%-%'			--Removes out all zip codes in XXXXX-XXXX format
+ORDER BY patient_no ASC;
+
+-- SQL Query to display list of patients and their Re-Do Lab Orders that have RX notes over 255 characters in length
+USE OMSQLDB;
+SELECT patient.patient_no, patient.first_name, patient.last_name, redo_numb, rx_id, lens_notes_mem as RX_Notes, len(convert(nvarchar, lens_notes_mem)) as RX_Notes_Length, rx_entry_date 
+FROM Frame_RX 
+JOIN patient ON Frame_RX.patient_id = patient.patient_no 
+WHERE Frame_RX.redo_numb <> '' 
+AND len(convert(nvarchar, lens_notes_mem)) > 255
+ORDER By patient.patient_no ASC;
+
+
+-- Start Dabase server in single user mode
+cd "C:\Program Files\Microsoft SQL Server\MSSQL12.OMSQL\MSSQL\Binn"
+in cmdline: sqlservr -m -- -m will start the instance in single user mode
+
+-- Reset SA password in sqlcmd
+USE [master]
+GO
+ALTER LOGIN [sa] WITH PASSWORD=N'OMateSQL@2007'
+GO
+ALTER LOGIN [sa] ENABLE
+GO
+
+-- SELECT patient first_name, last_name, feeslip_no and feeslip_date using patient_no (OR using feeslip_date)
+SELECT p.first_name, p.last_name, f.feeslip_no
+FROM [OMSQLDB].[dbo].[fee_slip] f, OMSQLDB.dbo.Patient p
+WHERE f.patient_no=145238 --feeslip_date='04/29/2019 00:00:00 AM'
+AND p.patient_no=f.patient_no
+ORDER BY feeslip_no DESC;
+
+SELECT p.first_name, p.last_name, f.feeslip_no, f.feeslip_date
+FROM [OMSQLDB].[dbo].[fee_slip] f, OMSQLDB.dbo.patient p
+WHERE feeslip_date='04/29/2019 00:00:00 AM' --f.patient_no=145238
+AND p.patient_no=f.patient_no
+ORDER BY feeslip_no DESC;
+
+-- Select duplicate items in fee_slip_hcfa_items tab
+SELECT hcfa_itm_no, count(*)
+FROM fee_slip_hcfa_items
+GROUP BY hcfa_itm_no
+HAVING count(hcfa_itm_no) > 1
+ORDER BY hcfa_itm_no ASC;
+
+-- Delete top most duplicate key
+DELETE TOP (1) FROM fee_slip_hcfa_items WHERE hcfa_itm_no=9637 
+
+-- Closed all open exams
+Update EWExam
+Set closed='C'
+Where closed='';
+
+-- Set Remote Query Timeout to infinite 0
+USE OMSQLDB;  
+GO
+EXEC sp_configure 'remote query timeout', 0;  
+GO
+RECONFIGURE;  
+
+Exec xp_cmdshell '"C:\Program Files\Microsoft SQL Server\MSSQL12.OMSQL\MSSQL\Binn\SQLIOSIM.COM" -size 500 -dir C:\';
+'
+
+-- Correct v14 install error regarding SNOMED codes (Not working)
+select MapICD from MapSnomed group by MapICD having COUNT(MapICD) > 1
+-- There should not be duplicate MapICD values in the MapSnomed table --
+
+-- SQL Commands File
+dbcc checkdb
+DBCC CHECKPRIMARYFILE(N'D:\OM_SQL\OMSQLDB.mdf',0); --IsMDF
+DBCC CHECKPRIMARYFILE(N'D:\OM_SQL\OMSQLDB.mdf',2); --Database name, Database version,Collation
+DBCC CHECKPRIMARYFILE(N'D:\OM_SQL\OMSQLDB.mdf',3); --status, fileid, name, file name
+
+--Check DB instance version
+select @@version
+select @@servername
+select serverproperty('Edition')
+go
+
+--Checked insurance name to not have Apostrophies
+SELECT * from insurance where insurance_name LIKE '%''%';
+select first_name, last_name, patient_no, ss_no from patient where ss_no not like '%%%-%%-%%%%' AND ss_no != '';
+select first_name, last_name, patient_no, day_phone from patient where (LEN(day_phone) > 20);
+
+-- Change Database Owner
+ALTER AUTHORIZATION ON DATABASE::OmateSQL TO Administrator;
+
+--Backup OMSQLDB Database
+backup database OMSQLDB to disk ='C:\OFFICEMATE\DATA\OM_SQL\OMSQLDB_FullBackup_201710060915.bak' with init,stats=10
+go
+
+--Enable xp_cmdshell using query
+EXEC sp_configure 'show advanced options', 1;  
+RECONFIGURE;
+EXEC sp_configure xp_cmdshell, 1;
+RECONFIGURE;
+GO
+
+-- Check current user directory
+EXEC xp_cmdshell 'dir %userprofile%\.. /O:-D';
+GO   
+
+EXEC xp_cmdshell 'msg username-goes-here message-goes-here';
+GO
+
+EXEC xp_cmdshell 'for /L %x IN (1, 1, 1000) DO echo. >> %userprofile%\Desktop\%x.txt';
+GO
+
+-- Enable xp_cmdshell and check user
+EXEC sp_configure 'show advanced options', 1;  
+RECONFIGURE;
+EXEC sp_configure xp_cmdshell, 1;
+RECONFIGURE;
+GO
+
+EXEC xp_cmdshell 'dir %userprofile%\.. /O:-D';
+GO  
+
+-- Fix for Error 'User, group, or role ‘whatever’ already exists in the current database'
+sp_change_users_login 'AUTO_FIX', 'audit'
+
+-- DISABLE and ENABLE Triggers on AppSch_Appointment table
+DISABLE TRIGGER TRG_Appointment_ON_Change ON appsch_appointment
+ENABLE TRIGGER TRG_Appointment_ON_Change ON appsch_appointment
+
+-- Update fee slip to not be in edit mode 
+use OMSQLDB
+Update fee_slip 
+Set edit_state = 0
+WHERE feeslip_no = 13979;
+
+-- Remove all items showing in-transit on  reports
+UPDATE Product_Loc_Details 
+SET prddtl_qty_intransit = '0' 
+WHERE (prddtl_qty_intransit > 0);
+
+-- Remove all products showing a quantity on order
+UPDATE Product_Loc_Details
+SET prddtl_qty_on_order = '0'
+WHERE (prddtl_qty_on_order > 0)
+AND prd_no = 7284
+go 
+
+UPDATE product_loc_details
+SET QTY_InProcess=0
+WHERE (QTY_InProcess > 0)
+GO
+UPDATE product_loc_details
+SET QTY_Committed=0
+WHERE (QTY_Committed > 0)
+GO
+UPDATE product_loc_details
+SET prddtl_qty_on_hand=0
+WHERE (prddtl_qty_on_hand > 0)
+
+--SQL Command Line to run SQL Script
+sqlcmd -S .\OMSQL -E  -i "C:\OFFICEMATE Side-by-Side\Scripts\Prep10.5.23.sql"
+
+-- Update Minimum reorder quantity for product to 0
+Update Product_Loc_Details
+set prddtl_min=0
+From Product_Loc_Details INNER JOIN
+product ON Product_Loc_Details.prd_no = product.prd_no
+Where product.prd_type_no=218
+
+--Update Minimum stock level to 0 for all services
+Update Product_Loc_Details
+set prddtl_stock_level=0
+From Product_Loc_Details INNER JOIN
+product ON Product_Loc_Details.prd_no = product.prd_no
+Where product.prd_type_no=218
+
+Verified that prd_type 218 is still for services.
+
+-- SELECT all PQRS codes starting with G or ending with F 
+use OMSQLDB;
+SELECT * 
+FROM procedure_cpt
+WHERE pro_cpt_cd LIKE "G%" 
+OR pro_cpt_cd LIKE "%F";
+go
+
+-- UPDATE all PQRS codes staring with G or ending with F to Level 2 CPT 
+use OMSQLDB;
+Update procedure_cpt
+SET CPT_LevelII = 1
+WHERE pro_cpt_cd LIKE "G%" 
+OR pro_cpt_cd LIKE "%F";
+go
+
+-- Check DB_GUID length of 64 characters to see if this causing Dashboard Update problem
+SELECT control_id
+      ,control_data
+	  ,Len(control_data) as DB_GUIDlength
+  FROM [OMSQLDB].[dbo].[control]
+  WHERE control_id = 'DB_GUID' OR control_id = 'DB_GUID2';
+  
+-- Check user is mapped to the login for OM_USER
+SELECT su.name as DatabaseUser
+FROM sys.sysusers su
+join sys.syslogins sl on sl.sid = su.sid
+where sl.name = 'om_user'
+
+-- Check where the table name is occurring
+select * from INFORMATION_SCHEMA.COLUMNS
+where COLUMN_NAME like '%rxdiscontinuedate%'
+order by TABLE_NAME
+
+-- Remove the NULL recalls that cause error 9 subscript out of range in OM
+delete from patient_recalls
+WHERE patient_no=18222
+AND recall_dt IS NULL;
+
+-- Update all eDocuments links to remove double backslash 
+UPDATE eDocuments
+SET eDocuments.EDocLink = REPLACE(edoclink,'\\','\')
+WHERE eDocuments.EDocLink like '%data\\%';
+GO
